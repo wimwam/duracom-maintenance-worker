@@ -3,7 +3,7 @@
 Plugin Name: Duracom maintenance worker
 Plugin URI: https://duracom.nl/
 Description: Call maintenance hooks in duracom backoffice
-Version: 1.1
+Version: 2.0.0
 Author: Wiebe-Jan Valkema
 Author URI: https://valkemedia.nl/
 Gemaakt door: WJ Valkema
@@ -31,7 +31,7 @@ class duracom_maintenance_worker
          */
         add_action('automatic_updates_complete', function ($results) {
             $results = json_decode(json_encode($results), true);
-            $this->callback(serialize($results));
+            $this->callback(serialize($results), 'automatic');
         });
 
         /**
@@ -43,22 +43,24 @@ class duracom_maintenance_worker
 //            }
 
             $results = json_decode(json_encode($options), true);
-            $this->callback(serialize($results));
+            $this->callback(serialize($results), 'manual');
         }, 10, 2);
     }
 
     /**
-     * @param $data
+     * @param string $data
+     * @param string $mode
      *
      * @return mixed
      */
-    private function callback($data)
+    private function callback($data, $mode)
     {
         return wp_remote_get(sprintf(
-            'https://bo.duracom.nl/hook/domain/updated?key=%s&domain_url=%s&msg=%s',
+            'https://bo.duracom.nl/hook/domain/updated?key=%s&domain_url=%s&msg=%s&type=%s',
             md5(DURACOM_TOKEN),
             get_site_url(),
-            serialize($data)
+            serialize($data),
+            $mode
         ), [
             'headers' => [
                 'Accept-Language' => 'en-US'
