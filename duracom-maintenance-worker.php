@@ -67,6 +67,7 @@ class duracom_maintenance_worker
                 'Accept-Language' => 'en-US'
             ],
             'timeout' => 30,
+            'user-agent' => 'Duracom maintenance worker',
             'redirection' => 5,
             'httpversion' => '1.1',
             'sslverify' => false
