@@ -6,7 +6,7 @@ namespace DuracomMaintenanceWorker;
 Plugin Name: Duracom maintenance worker
 Plugin URI: https://duracom.nl/
 Description: Call maintenance hooks in duracom backoffice
-Version: 2.0.7
+Version: 2.0.8
 Update URI: https://github.com/wimwam/duracom-maintenance-worker
 Author: Wiebe-Jan Valkema
 Author URI: https://valkemedia.nl/
@@ -29,7 +29,7 @@ class duracom_maintenance_worker
         new GitHubUpdater(
             'wimwam/duracom-maintenance-worker',
             plugin_basename(__FILE__),
-            '2.0.7',
+            '2.0.8',
             'duracom-maintenance-worker'
         );
 
