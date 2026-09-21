@@ -1,11 +1,12 @@
 <?php
 
 namespace DuracomMaintenanceWorker;
+
 /*
 Plugin Name: Duracom maintenance worker
 Plugin URI: https://duracom.nl/
 Description: Call maintenance hooks in duracom backoffice
-Version: 2.0.4
+Version: 2.0.7
 Update URI: https://github.com/wimwam/duracom-maintenance-worker
 Author: Wiebe-Jan Valkema
 Author URI: https://valkemedia.nl/
@@ -16,7 +17,7 @@ Text Domain: duracom
 
 if (!defined('ABSPATH')) {
     exit;
-} // Exit if accessed directly
+}
 
 class duracom_maintenance_worker
 {
@@ -28,67 +29,91 @@ class duracom_maintenance_worker
         new GitHubUpdater(
             'wimwam/duracom-maintenance-worker',
             plugin_basename(__FILE__),
-            '2.0.4',
+            '2.0.7',
             'duracom-maintenance-worker'
         );
 
+        new Settings();
+
         /**
          * Fires after all automatic updates have run.
-         * Completes the update scheduled in background.
          *
          * @param array $results The results of all attempted updates.
-         *
-         * @since  3.8.0
          */
         add_action('automatic_updates_complete', function ($results) {
             $results = json_decode(json_encode($results), true);
-            $this->callback(serialize($results), 'automatic');
+
+            $this->callback(
+                serialize($results),
+                'automatic'
+            );
         });
 
         /**
-         * hook for manual updates callbacks
+         * Hook for manual updates callbacks.
          */
         add_action('upgrader_process_complete', function ($upgrader_object, $options) {
-//            if ( $options['action'] !== 'update' || $options['type'] !== 'plugin' ) {
-//                return;
-//            }
-
             $results = json_decode(json_encode($options), true);
-            $this->callback(serialize($results), 'manual');
+
+            $this->callback(
+                serialize($results),
+                'manual'
+            );
         }, 10, 2);
     }
 
     /**
+     * Verstuur callback naar Duracom.
+     *
      * @param string $data
      * @param string $mode
      *
-     * @return mixed
+     * @return array|\WP_Error
      */
     private function callback($data, $mode)
     {
-        if (empty($duracom_token = get_option('duracom_token'))) {
-            return;
+        $token = get_option('duracom_token', '');
+
+        /*
+         * Zonder token heeft het geen zin om de callback
+         * naar de backoffice te sturen.
+         */
+        if (empty($token)) {
+            return new \WP_Error(
+                'duracom_missing_token',
+                'Duracom token is niet ingesteld.'
+            );
         }
 
-        return wp_remote_get(sprintf(
-            'https://bo.duracom.nl/hook/domain/updated?key=%s&domain_url=%s&ver=%s&ver1=%s&type=%s&msg=%s',
-            md5(DURACOM_TOKEN),
-            get_site_url(),
-            wp_get_wp_version(),
-            phpversion(),
-            $mode,
-            serialize($data)
-        ), [
-            'headers' => [
-                'Accept-Language' => 'en-US'
-            ],
-            'timeout' => 30,
-            'user-agent' => 'Duracom maintenance worker',
-            'redirection' => 5,
-            'httpversion' => '1.1',
-            'sslverify' => false
-        ]);
+        return wp_remote_get(
+            add_query_arg(
+                [
+                    'key'        => md5($token),
+                    'domain_url' => get_site_url(),
+                    'ver'        => wp_get_wp_version(),
+                    'ver1'       => PHP_VERSION,
+                    'type'       => $mode,
+                    'msg'        => serialize($data),
+                ],
+                'https://bo.duracom.nl/hook/domain/updated'
+            ),
+            [
+                'headers' => [
+                    'Accept-Language' => 'en-US',
+                ],
+                'timeout' => 30,
+                'user-agent' => 'Duracom maintenance worker',
+                'redirection' => 5,
+                'httpversion' => '1.1',
+
+                /*
+                 * Dit zou ik eigenlijk op true zetten.
+                 * Zie toelichting hieronder.
+                 */
+                'sslverify' => true,
+            ]
+        );
     }
 }
 
-$init = new duracom_maintenance_worker();
+new duracom_maintenance_worker();

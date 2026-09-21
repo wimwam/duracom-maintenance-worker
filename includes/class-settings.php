@@ -4,14 +4,8 @@ namespace DuracomMaintenanceWorker;
 
 class Settings
 {
-    /**
-     * Naam van de option in wp_options.
-     */
     private const OPTION_NAME = 'duracom_token';
 
-    /**
-     * Constructor.
-     */
     public function __construct()
     {
         add_action(
@@ -26,26 +20,26 @@ class Settings
     }
 
     /**
-     * Voeg de instellingenpagina toe aan het WordPress-menu.
+     * Voeg de instellingenpagina toe onder Instellingen.
      */
     public function add_settings_page(): void
     {
         add_options_page(
-            'Duracom Maintenance worker instellingen',
-            'Duracom Maintenance worker',
+            'Duracom Maintenance Worker',
+            'Duracom Maintenance Worker',
             'manage_options',
-            'duracom-maintenance-worker-settings',
+            'duracom-maintenance-worker',
             [$this, 'render_settings_page']
         );
     }
 
     /**
-     * Registreer de setting.
+     * Registreer instellingen.
      */
     public function register_settings(): void
     {
         register_setting(
-            'duracom_maintenance_worker_settings',
+            'duracom_maintenance_worker',
             self::OPTION_NAME,
             [
                 'type'              => 'string',
@@ -55,35 +49,39 @@ class Settings
         );
 
         add_settings_section(
-            'duracom_maintenance_worker_main_section',
-            'Instellingen',
-            [$this, 'render_section_description'],
-            'duracom-maintenance-worker-settings'
+            'duracom_main',
+            'Duracom instellingen',
+            [$this, 'render_section'],
+            'duracom-maintenance-worker'
         );
 
         add_settings_field(
             'duracom_token',
             'Duracom token',
             [$this, 'render_token_field'],
-            'duracom-maintenance-worker-settings',
-            'duracom_maintenance_worker_main_section'
+            'duracom-maintenance-worker',
+            'duracom_main'
         );
     }
 
     /**
-     * Beschrijving boven de instellingen.
+     * Beschrijving van de instellingen.
      */
-    public function render_section_description(): void
+    public function render_section(): void
     {
-        echo '<p>Hier kun je de instellingen van de plugin beheren.</p>';
+        echo '<p>';
+        echo esc_html(
+            'Stel hier het token in waarmee deze website communiceert met de Duracom backoffice.'
+        );
+        echo '</p>';
     }
 
     /**
-     * Render het tokenveld.
+     * Token invoerveld.
      */
     public function render_token_field(): void
     {
-        $value = get_option(
+        $token = get_option(
             self::OPTION_NAME,
             ''
         );
@@ -92,20 +90,35 @@ class Settings
         <input
             type="password"
             name="<?php echo esc_attr(self::OPTION_NAME); ?>"
-            value="<?php echo esc_attr($value); ?>"
+            value="<?php echo esc_attr($token); ?>"
             class="regular-text"
             autocomplete="new-password"
         />
+
+        <?php if (!empty($token)) : ?>
+
+        <p class="description">
+            Er is momenteel een Duracom token ingesteld.
+            Laat het veld ongewijzigd om het huidige token te behouden.
+        </p>
+
+    <?php else : ?>
 
         <p class="description">
             Vul hier het Duracom token in.
         </p>
 
+    <?php endif; ?>
+
         <?php
     }
 
     /**
-     * Sanitize het token voordat het wordt opgeslagen.
+     * Sanitize het token.
+     *
+     * @param mixed $value
+     *
+     * @return string
      */
     public function sanitize_token($value): string
     {
@@ -117,7 +130,7 @@ class Settings
     }
 
     /**
-     * Render de instellingenpagina.
+     * Render instellingenpagina.
      */
     public function render_settings_page(): void
     {
@@ -129,7 +142,7 @@ class Settings
         <div class="wrap">
 
             <h1>
-                Mijn Plugin instellingen
+                Duracom Maintenance Worker
             </h1>
 
             <form method="post" action="options.php">
@@ -137,11 +150,11 @@ class Settings
                 <?php
 
                 settings_fields(
-                    'duracom_maintenance_worker_settings'
+                    'duracom_maintenance_worker'
                 );
 
                 do_settings_sections(
-                    'duracom-maintenance-worker-plugin-settings'
+                    'duracom-maintenance-worker'
                 );
 
                 submit_button(
