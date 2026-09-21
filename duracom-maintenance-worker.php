@@ -14,8 +14,6 @@ License: GPLv2 or later
 Text Domain: duracom
 */
 
-const DURACOM_TOKEN = 'lacFB%@6qH42#dK#2mrnQopf!BX67&#m';
-
 if (!defined('ABSPATH')) {
     exit;
 } // Exit if accessed directly
@@ -25,6 +23,7 @@ class duracom_maintenance_worker
     public function __construct()
     {
         require_once __DIR__ . '/includes/class-github-updater.php';
+        require_once __DIR__ . '/includes/class-settings.php';
 
         new GitHubUpdater(
             'wimwam/duracom-maintenance-worker',
@@ -67,6 +66,10 @@ class duracom_maintenance_worker
      */
     private function callback($data, $mode)
     {
+        if (empty($duracom_token = get_option('duracom_token'))) {
+            return;
+        }
+
         return wp_remote_get(sprintf(
             'https://bo.duracom.nl/hook/domain/updated?key=%s&domain_url=%s&ver=%s&ver1=%s&type=%s&msg=%s',
             md5(DURACOM_TOKEN),
