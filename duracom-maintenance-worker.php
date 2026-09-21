@@ -3,7 +3,7 @@
 Plugin Name: Duracom maintenance worker
 Plugin URI: https://duracom.nl/
 Description: Call maintenance hooks in duracom backoffice
-Version: 2.0.1
+Version: 2.0.2
 Author: Wiebe-Jan Valkema
 Author URI: https://valkemedia.nl/
 Gemaakt door: WJ Valkema
