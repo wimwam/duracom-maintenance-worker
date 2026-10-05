@@ -33,6 +33,13 @@ class GitHubUpdater
     private string $repository_url;
 
     /**
+     * GitHub Personal Access Token.
+     *
+     * Een leeg token betekent dat de repository als public wordt behandeld.
+     */
+    private string $token;
+
+    /**
      * Cache duur in seconden.
      */
     private int $cache_time = 43200; // 12 uur
@@ -40,10 +47,10 @@ class GitHubUpdater
     /**
      * Constructor.
      *
-     * @param string $repository     GitHub repository, bijvoorbeeld username/repository
-     * @param string $plugin_file    Plugin basename
-     * @param string $current_version Huidige pluginversie
-     * @param string|null $slug      Plugin slug
+     * @param string      $repository     GitHub repository, bijvoorbeeld username/repository
+     * @param string      $plugin_file    Plugin basename
+     * @param string      $current_version Huidige pluginversie
+     * @param string|null $slug           Plugin slug
      */
     public function __construct(
         string $repository,
@@ -54,10 +61,9 @@ class GitHubUpdater
         $this->repository = trim($repository, '/');
         $this->plugin_file = $plugin_file;
         $this->current_version = ltrim(trim($current_version), 'v');
-
         $this->slug = $slug ?: dirname($plugin_file);
-
         $this->repository_url = 'https://github.com/' . $this->repository;
+        $this->token = (string) get_option('duracom_token', '');
 
         /*
          * WordPress moet weten dat dit geen WordPress.org-plugin is.
@@ -86,6 +92,18 @@ class GitHubUpdater
             [$this, 'clear_cache_after_update'],
             10,
             2
+        );
+
+        /*
+         * Private GitHub repositories kunnen hun ZIP niet rechtstreeks
+         * door WordPress laten downloaden. Onderschep daarom de download
+         * en voeg de GitHub-authenticatie toe.
+         */
+        add_filter(
+            'upgrader_pre_download',
+            [$this, 'download_package'],
+            10,
+            4
         );
     }
 
@@ -139,7 +157,6 @@ class GitHubUpdater
 
             $update->slug = $this->slug;
             $update->plugin = $this->plugin_file;
-
             $update->new_version = $latest_version;
             $update->url = $release['html_url'];
 
@@ -193,17 +210,13 @@ class GitHubUpdater
         $info->name = $this->get_plugin_name();
         $info->slug = $this->slug;
         $info->version = $release['version'];
-
         $info->author = $this->get_plugin_author();
         $info->homepage = $this->repository_url;
-
         $info->download_link = $release['package'];
-
         $info->last_updated = $release['published_at'];
 
         $info->sections = [
             'description' => $this->get_plugin_description(),
-
             'changelog' => $this->format_changelog(
                 $release['body']
             ),
@@ -237,19 +250,10 @@ class GitHubUpdater
             $this->repository
         );
 
-        $response = wp_remote_get(
+        $response = $this->github_request(
             $url,
             [
                 'timeout' => 10,
-
-                'headers' => [
-                    'Accept' => 'application/vnd.github+json',
-
-                    /*
-                     * GitHub verwacht een User-Agent.
-                     */
-                    'User-Agent' => 'WordPress/' . get_bloginfo('url'),
-                ],
             ]
         );
 
@@ -311,15 +315,10 @@ class GitHubUpdater
 
         $release = [
             'version' => $version,
-
             'tag_name' => $data['tag_name'],
-
             'html_url' => $data['html_url'] ?? $this->repository_url,
-
             'package' => $package,
-
             'body' => $data['body'] ?? '',
-
             'published_at' => $data['published_at'] ?? '',
         ];
 
@@ -333,6 +332,255 @@ class GitHubUpdater
         );
 
         return $release;
+    }
+
+    /**
+     * Maak een request naar de GitHub API.
+     *
+     * Een token wordt alleen toegevoegd als er een token is ingesteld.
+     * Hierdoor blijven publieke repositories gewoon werken.
+     *
+     * @param string $url
+     * @param array  $args
+     *
+     * @return array|\WP_Error
+     */
+    private function github_request(string $url, array $args = [])
+    {
+        $headers = [
+            'Accept' => 'application/vnd.github+json',
+            'User-Agent' => 'WordPress/' . get_bloginfo('url'),
+        ];
+
+        if (!empty($this->token)) {
+            $headers['Authorization'] = 'Bearer ' . $this->token;
+        }
+
+        $args['headers'] = array_merge(
+            $headers,
+            $args['headers'] ?? []
+        );
+
+        return wp_remote_get($url, $args);
+    }
+
+    /**
+     * Download een GitHub package.
+     *
+     * Voor publieke repositories kan WordPress de URL normaal downloaden.
+     * Voor private repositories gebruiken we de GitHub-token.
+     *
+     * Bij een GitHub download-URL kan GitHub een redirect geven naar een
+     * tijdelijke download-URL. De Authorization-header wordt bewust niet
+     * meegestuurd naar die externe downloadhost.
+     *
+     * @param bool|\WP_Error $reply
+     * @param string         $package
+     * @param object         $upgrader
+     * @param array          $hook_extra
+     *
+     * @return bool|\WP_Error|string
+     */
+    public function download_package(
+        $reply,
+        string $package,
+        $upgrader,
+        array $hook_extra
+    ) {
+        /*
+         * Als er geen token is, is er geen reden om een public package
+         * over te nemen. WordPress handelt de download zelf af.
+         */
+        if (empty($this->token)) {
+            return $reply;
+        }
+
+        /*
+         * Alleen GitHub-URLs van onze eigen repository onderscheppen.
+         */
+        if (!$this->is_github_package_url($package)) {
+            return $reply;
+        }
+
+        $tmp_file = $this->download_github_package($package);
+
+        if (is_wp_error($tmp_file)) {
+            return $tmp_file;
+        }
+
+        return $tmp_file;
+    }
+
+    /**
+     * Controleer of een package-URL bij onze repository hoort.
+     *
+     * @param string $url
+     *
+     * @return bool
+     */
+    private function is_github_package_url(string $url): bool
+    {
+        $parts = wp_parse_url($url);
+
+        if (empty($parts['host']) || empty($parts['path'])) {
+            return false;
+        }
+
+        $host = strtolower($parts['host']);
+        $path = trim($parts['path'], '/');
+        $repository_path = trim($this->repository, '/');
+
+        if ($host === 'github.com') {
+            return strpos($path, $repository_path . '/') === 0
+                || $path === $repository_path;
+        }
+
+        if ($host === 'api.github.com') {
+            return strpos($path, 'repos/' . $repository_path . '/') === 0;
+        }
+
+        return false;
+    }
+
+    /**
+     * Download een private GitHub package naar een tijdelijk bestand.
+     *
+     * Eerst wordt de GitHub URL met Authorization aangeroepen zonder
+     * redirects te volgen. Wanneer GitHub een tijdelijke download-URL
+     * teruggeeft, wordt die URL daarna zonder GitHub-token gedownload.
+     *
+     * @param string $url
+     *
+     * @return string|\WP_Error
+     */
+    private function download_github_package(string $url)
+    {
+        $tmp_file = wp_tempnam($url);
+
+        if (!$tmp_file) {
+            return new \WP_Error(
+                'github_download_temp',
+                'Er kon geen tijdelijk bestand voor de GitHub-update worden aangemaakt.'
+            );
+        }
+
+        /*
+         * Gebruik eerst een authenticated request en volg redirects niet.
+         * Zo lekken we de Authorization-header niet naar de uiteindelijke
+         * downloadhost van GitHub.
+         */
+        $response = wp_remote_get(
+            $url,
+            [
+                'timeout' => 60,
+                'redirection' => 0,
+                'headers' => [
+                    'Accept' => 'application/octet-stream',
+                    'Authorization' => 'Bearer ' . $this->token,
+                    'User-Agent' => 'WordPress/' . get_bloginfo('url'),
+                ],
+            ]
+        );
+
+        if (is_wp_error($response)) {
+            @unlink($tmp_file);
+            return new \WP_Error(
+                'github_download_failed',
+                'GitHub package kon niet worden gedownload: ' . $response->get_error_message()
+            );
+        }
+
+        $status_code = wp_remote_retrieve_response_code($response);
+
+        /*
+         * GitHub release downloads geven normaal een 302/301 naar een
+         * tijdelijke URL. Download die URL vervolgens zonder token.
+         */
+        if (in_array($status_code, [301, 302, 303, 307, 308], true)) {
+            $location = wp_remote_retrieve_header($response, 'location');
+
+            if (empty($location)) {
+                @unlink($tmp_file);
+
+                return new \WP_Error(
+                    'github_download_redirect',
+                    'GitHub gaf een redirect terug zonder download-URL.'
+                );
+            }
+
+            $response = wp_remote_get(
+                $location,
+                [
+                    'timeout' => 60,
+                    'redirection' => 5,
+                    'stream' => true,
+                    'filename' => $tmp_file,
+                ]
+            );
+
+            if (is_wp_error($response)) {
+                @unlink($tmp_file);
+
+                return new \WP_Error(
+                    'github_download_failed',
+                    'GitHub package kon niet worden gedownload: ' . $response->get_error_message()
+                );
+            }
+        } else {
+            /*
+             * Sommige GitHub endpoints kunnen de inhoud direct teruggeven.
+             * Schrijf die response naar het tijdelijke bestand.
+             */
+            $body = wp_remote_retrieve_body($response);
+
+            if ($status_code !== 200 || $body === '') {
+                @unlink($tmp_file);
+
+                return new \WP_Error(
+                    'github_download_failed',
+                    sprintf(
+                        'GitHub package kon niet worden gedownload. HTTP-status: %d',
+                        $status_code
+                    )
+                );
+            }
+
+            if (file_put_contents($tmp_file, $body) === false) {
+                @unlink($tmp_file);
+
+                return new \WP_Error(
+                    'github_download_write',
+                    'GitHub package kon niet naar het tijdelijke bestand worden geschreven.'
+                );
+            }
+
+            return $tmp_file;
+        }
+
+        $download_status = wp_remote_retrieve_response_code($response);
+
+        if ($download_status !== 200) {
+            @unlink($tmp_file);
+
+            return new \WP_Error(
+                'github_download_failed',
+                sprintf(
+                    'GitHub package kon niet worden gedownload. HTTP-status: %d',
+                    $download_status
+                )
+            );
+        }
+
+        if (!file_exists($tmp_file) || filesize($tmp_file) === 0) {
+            @unlink($tmp_file);
+
+            return new \WP_Error(
+                'github_download_empty',
+                'GitHub heeft een leeg package teruggegeven.'
+            );
+        }
+
+        return $tmp_file;
     }
 
     /**
@@ -370,7 +618,10 @@ class GitHubUpdater
 
             $name = strtolower($asset['name']);
 
-            if (substr($name, -4) === '.zip' && strpos($name, strtolower($release['tag_name']))) {
+            if (
+                substr($name, -4) === '.zip' &&
+                strpos($name, strtolower($release['tag_name'])) !== false
+            ) {
                 return $asset['browser_download_url'];
             }
         }
@@ -396,6 +647,8 @@ class GitHubUpdater
 
     /**
      * Cache key.
+     *
+     * @return string
      */
     private function get_cache_key(): string
     {
@@ -408,8 +661,8 @@ class GitHubUpdater
      * Cache verwijderen nadat WordPress een update
      * heeft uitgevoerd.
      *
-     * @param WP_Upgrader $upgrader
-     * @param array       $options
+     * @param \WP_Upgrader $upgrader
+     * @param array        $options
      */
     public function clear_cache_after_update($upgrader, $options): void
     {
@@ -434,6 +687,8 @@ class GitHubUpdater
 
     /**
      * Pluginnaam uit de plugin header.
+     *
+     * @return string
      */
     private function get_plugin_name(): string
     {
@@ -444,6 +699,8 @@ class GitHubUpdater
 
     /**
      * Auteur.
+     *
+     * @return string
      */
     private function get_plugin_author(): string
     {
@@ -454,6 +711,8 @@ class GitHubUpdater
 
     /**
      * Beschrijving.
+     *
+     * @return string
      */
     private function get_plugin_description(): string
     {
@@ -464,6 +723,8 @@ class GitHubUpdater
 
     /**
      * WordPress-versie waarvoor getest is.
+     *
+     * @return string
      */
     private function get_tested_version(): string
     {
@@ -474,6 +735,8 @@ class GitHubUpdater
 
     /**
      * Minimale WordPress-versie.
+     *
+     * @return string
      */
     private function get_requires_version(): string
     {
@@ -484,6 +747,8 @@ class GitHubUpdater
 
     /**
      * Minimale PHP-versie.
+     *
+     * @return string
      */
     private function get_requires_php(): string
     {
@@ -494,6 +759,8 @@ class GitHubUpdater
 
     /**
      * Plugin header uitlezen.
+     *
+     * @return array
      */
     private function get_plugin_data(): array
     {
@@ -524,6 +791,10 @@ class GitHubUpdater
 
     /**
      * GitHub Markdown changelog omzetten naar simpele HTML.
+     *
+     * @param string $body
+     *
+     * @return string
      */
     private function format_changelog(string $body): string
     {
