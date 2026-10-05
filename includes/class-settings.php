@@ -143,6 +143,9 @@ class Settings
             wp_die('Je hebt geen toestemming om deze actie uit te voeren.');
         }
 
+        $mode = 'manual';
+        $data = [];
+
         check_admin_referer('duracom_test_settings');
 
         $token = get_option('duracom_token', '');
@@ -167,8 +170,8 @@ class Settings
                     'domain_url' => get_site_url(),
                     'ver'        => wp_get_wp_version(),
                     'ver1'       => PHP_VERSION,
-                    'type'       => 'test',
-                    'msg'        => 'Duracom Maintenance Worker test',
+                    'type'       => $mode,
+                    'msg'        => serialize($data),
                 ],
                 'https://webhooks.duracom.nl/hook/domain/updated'
             ),
@@ -180,6 +183,11 @@ class Settings
                 'user-agent' => 'Duracom maintenance worker',
                 'redirection' => 5,
                 'httpversion' => '1.1',
+
+                /*
+                 * Dit zou ik eigenlijk op true zetten.
+                 * Zie toelichting hieronder.
+                 */
                 'sslverify' => true,
             ]
         );
