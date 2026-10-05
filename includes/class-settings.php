@@ -207,6 +207,13 @@ class Settings
                     'duracom_test' => 'success',
                 ];
             } else {
+
+                $status_code = wp_remote_retrieve_response_code($response);
+                $body = wp_remote_retrieve_body($response);
+
+                error_log('Duracom test HTTP status: ' . $status_code);
+                error_log('Duracom test response: ' . $body);
+
                 $redirect_args = [
                     'page' => 'duracom-maintenance-worker',
                     'duracom_test' => 'http_error',
